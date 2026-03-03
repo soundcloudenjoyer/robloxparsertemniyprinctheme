@@ -532,14 +532,14 @@ BOOL htmlOpen() {
         background: white;
         z-index: 999999999;
         opacity: 0;
-        animation: circleDisAppear 0.3s ease forwards;
+        transition: none;
+        cursor: pointer;
     }
 
     .circle.active {
         opacity: 1;
         transform: translateX(-50%) scale(1);
-        animation: circleAppear 0.25s ease forwards,
-                   moveCircle 0.1s linear forwards;
+        animation: circleAppear 0.25s ease forwards;
         animation-play-state: running;
     }
     .circle.opacitychange {
@@ -547,7 +547,6 @@ BOOL htmlOpen() {
         transform: translateX(-50%) scale(1);
         animation:
                 circleAppear 0.25s ease forwards,
-                moveCircle 0.1s linear forwards,
                 CircleOpacityChange 0.2s ease forwards ;
     }
     @keyframes CircleOpacityChange {
@@ -574,9 +573,11 @@ BOOL htmlOpen() {
     }
     @keyframes circleAppear {
         from {
+            opacity: 0;
             transform: translateX(-50%) scale(0);
         }
         to {
+            opacity: 1;
             transform: translateX(-50%) scale(1);
         }
     }
@@ -623,6 +624,19 @@ BOOL htmlOpen() {
  to {
      opacity: 0;
  }
+}
+
+
+.little-black-rectangle {
+    height: 50px;
+    width: 300px;
+    position: fixed;
+    transform: translateX(-50%);
+    background: black;
+    top: 85%;
+    left: 50%;
+    opacity: 0.75;
+    border-radius: 8px;
 }
 </style>
 <!DOCTYPE html>
@@ -738,6 +752,9 @@ BOOL htmlOpen() {
                 });
             }
             async function onCopyTextbuttonCopyButton(text, button) {
+                if (!audio2.paused) {
+                    pauseAudio();
+                }
                 await navigator.clipboard.writeText(text);
                 const hub = new Audio('/resources/click.mp3')
                 hub.play();
@@ -754,7 +771,7 @@ BOOL htmlOpen() {
                     const playButton = document.querySelector('.play-track-button');
 
 
-                    playButton.style.display = 'none';
+                    playButton.style.opacity = '0';
                     copiedText.style.display = 'flex';
                     backgroundPrince.style.display = 'flex';
                     princeIMG.style.display = 'flex';
@@ -768,7 +785,10 @@ BOOL htmlOpen() {
                     leftblock.style.display = 'none';
                     princeIMG.style.display = 'none';
                     backgroundPrince.style.display = 'none';
-                    playButton.style.display = 'flex';
+                    playButton.style.opacity = '1';
+                    if (audio2.paused) {
+                        playAudio();
+                    }
 
             };
         </script>
@@ -779,22 +799,39 @@ BOOL htmlOpen() {
         <span class="circle"></span>
         </div>
 
-        <script>
+        <div class="little-black-rectangle">
+        </div>
+
+        <script type="module">
+            import { parseBlob } from 'https://cdn.jsdelivr.net/npm/music-metadata-browser/dist/music-metadata-browser.esm.js';
+            let songIsEnded = true;
             let circleMoving = false;
+            let animationFrameID = null;
+            let isDragging = false;
             let numOfSongs = 3;
             let num = Math.floor(Math.random() * numOfSongs + 1);
             const songs = [];
             for (let i = 0; i <= 3; i++) {
                 songs.push(`/resources/songs/${i}.mp3`);
             }
-            const audio2 = new Audio(songs[num]);
+            let audio2 = new Audio(songs[num]);
 
             const playButton = document.querySelector('.play-button');
             const pauseButton = document.querySelector('.pause-button');
             const playbackLine = document.querySelector('.playback-line');
             const playbackCircle = document.querySelector('.circle');
             playButton.onclick = () => playAudio();
+            (async () => {
+                await WaitForSongEnd(audio2);
+                console.log('song is over!');
+
+                pauseAudio();
+
+                num = Math.floor(Math.random() * numOfSongs + 1);
+                audio2 = new Audio(songs[num]);
+            })();
             pauseButton.onclick = () => pauseAudio();
+
 
 
             async function waitForAnimationEnd(el) {
@@ -803,48 +840,91 @@ BOOL htmlOpen() {
                 });
             }
 
-            async function waitForMetadata(audio) {
+            async function WaitForSongEnd(audio) {
                 return new Promise(resolve => {
-                   if (audio.readyState >= 1) {
-                       resolve();
-                   }
-                   else {
-                       audio.addEventListener('loadedmetadata', resolve, {once:true});
-                       }
+                    audio.addEventListener("ended", () => {
+                        songIsEnded = true;
+                        resolve();
+                   }, {once:true});
                 });
             }
-            async function playAudio() {
-                if (circleMoving == false) {
-                     await waitForMetadata(audio2);
-                    playbackCircle.style.animationDuration = audio2.duration + 's';
-                }
-                await audio2.play();
 
+            async function metadataPush(audio) {
+                const response = await fetch(audio2.src);
+                const blob = await response.blob();
+
+                const metadata = await parseBlob(blob);
+
+                console.log(metadata.common.title);
+            }
+            async function playAudio() {
+                songIsEnded = false;
+                await audio2.play();
                 playButton.classList.add('active');
                 pauseButton.classList.add('active');
 
-                if (circleMoving == false) {
+                metadataPush(audio2);
+
+                if (!circleMoving) {
                     playbackLine.classList.add('active');
-                }
-                await waitForAnimationEnd(playbackLine);
-                if (playbackCircle.style.animationPlayState  == 'paused') {
-                    playbackCircle.style.animationPlayState  = 'running';
-                }
-                if (circleMoving == false) {
                     playbackCircle.classList.add('active');
                     circleMoving = true;
                 }
+
+                playbackCircle.addEventListener('mousedown', (e) => {
+                    isDragging = true;
+                    audio2.pause();
+                    document.body.style.userSelect = 'none';
+
+                    const lineRect = playbackLine.getBoundingClientRect();
+
+                    function onMouseMove(e) {
+                        if (!isDragging) return;
+
+                        let x = e.clientX - lineRect.left;
+                        x = Math.max(0, Math.min(x, lineRect.width));
+
+                        const percent = x / lineRect.width;
+                        playbackCircle.style.left = `${7 + percent * (94 - 7)}%`;
+                        audio2.currentTime = audio2.duration * percent;
+                    }
+
+                    function onMouseUp(e) {
+                        isDragging = false;
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                        document.body.style.userSelect = '';
+                        audio2.play();
+                        updateCircle();
+                    }
+
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+                cancelAnimationFrame(animationFrameID);
+                updateCircle();
             }
             function pauseAudio() {
-                audio2.pause();
-                if (circleMoving == true) {
-                    playbackCircle.style.animationPlayState = 'paused';
+                if (!songIsEnded) {
+                    audio2.pause();
                 }
-                pauseButton.style.animationPlayState = 'paused';
                 pauseButton.classList.remove('active');
                 playButton.classList.remove('active');
-                if (circleMoving == false) {
+                if (songIsEnded) {
+                    playbackCircle.classList.remove('active');
                     playbackLine.classList.remove('active');
+                    circleMoving = false;
+                }
+                cancelAnimationFrame(animationFrameID);
+            }
+
+            function updateCircle() {
+                if (!circleMoving) return;
+
+                const progress = audio2.currentTime / audio2.duration;
+                playbackCircle.style.left = `${7 + progress * (94-7)}%`;
+                if (!audio2.paused) {
+                animationFrameID = requestAnimationFrame(updateCircle);
                 }
             }
         </script>
