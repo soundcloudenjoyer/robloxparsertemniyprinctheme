@@ -433,16 +433,83 @@
 }
 
 
-.little-black-rectangle {
-    height: 50px;
-    width: 300px;
+    .little-black-rectangle {
+        display: flex;
+        min-height: 50px;
+        width: 300px;
+        position: fixed;
+        transform: translateX(-50%);
+        background: black;
+        top: 85%;
+        left: 50%;
+        opacity: 1;
+        border-radius: 8px;
+        flex-direction: column;
+        align-items: flex-end;
+        word-wrap: break-word;
+        box-sizing: border-box;
+    }
+    .little-black-rectangle > * {
+        min-width: 0;
+        max-width: 100%;
+        word-wrap: break-word;
+        white-space: normal;
+    }
+    .title {
+        font-family: 'More is Less', sans-serif;
+        font-size: 15px;
+        color: white;
+        font-weight: 300;
+        font-style: normal;
+        position: fixed;
+        left: 55%;
+        top: 15%;
+        overflow-x: auto;
+        z-index: 9999999999999999999;
+        justify-content: right;
+        align-items: center;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        padding-right: 300px;
+    }
+
+@font-face {
+        font-family: 'More is Less';
+        src: url('/resources/11.ttf') format('truetype'),
+             url('/resources/12.ttf') format('truetype'),
+             url('/resources/13.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+        unicode-range: U+0400-04FF;
+    }
+
+.album-cover {
+    width: 43px;
+    height: 43px;
+    background: black;
+    position: fixed;
+    background-size: cover;    /* заставляет картинку заполнять блок полностью */
+    background-position: center center; /* центрирует картинку внутри блока */
+    transform: translateX(-50%);
+    top: 7.5%;
+    left: 15%;
+    bottom: 5px;
+    border-radius: 5px;
+    z-index: 9999999999999999999;
+}
+
+.time-elapsed {
+    font-family: 'More is Less', sans-serif;
+    font-size: 12px;
+    color: white;
+    font-weight: 300;
+    font-style: normal;
     position: fixed;
     transform: translateX(-50%);
-    background: black;
-    top: 85%;
-    left: 50%;
-    opacity: 0.75;
-    border-radius: 8px;
+    top: 65%;
+    left: 35%;
+    z-index: 9999999999999999999;
 }
 </style>
 <!DOCTYPE html>
@@ -454,6 +521,8 @@
     </head>
 
     <body>
+
+
         <span class="blackscreen"></span>
         <script>
             async function waitForBlackScreen(screen) {
@@ -606,10 +675,13 @@
         </div>
 
         <div class="little-black-rectangle">
+        <span class="title"></span>
+        <span class="album-cover"></span>
+        <span class="time-elapsed">test</span>
         </div>
 
         <script type="module">
-            import { parseBlob } from 'https://cdn.jsdelivr.net/npm/music-metadata-browser/dist/music-metadata-browser.esm.js';
+            import { parseBlob } from 'https://cdn.jsdelivr.net/npm/music-metadata-browser@2.5.11/+esm';
             let songIsEnded = true;
             let circleMoving = false;
             let animationFrameID = null;
@@ -621,11 +693,13 @@
                 songs.push(`/resources/songs/${i}.mp3`);
             }
             let audio2 = new Audio(songs[num]);
+            let metadata = null;
 
             const playButton = document.querySelector('.play-button');
             const pauseButton = document.querySelector('.pause-button');
             const playbackLine = document.querySelector('.playback-line');
             const playbackCircle = document.querySelector('.circle');
+            const timeText = document.querySelector('.time-elapsed');
             playButton.onclick = () => playAudio();
             (async () => {
                 await WaitForSongEnd(audio2);
@@ -646,6 +720,13 @@
                 });
             }
 
+            async function getMetadata(audio) {
+                const response = await fetch(audio.src);
+                const blob = await response.blob();
+
+                metadata = await parseBlob(blob);
+            }
+
             async function WaitForSongEnd(audio) {
                 return new Promise(resolve => {
                     audio.addEventListener("ended", () => {
@@ -655,25 +736,26 @@
                 });
             }
 
-            async function metadataPush(audio) {
-                const response = await fetch(audio2.src);
-                const blob = await response.blob();
-
-                const metadata = await parseBlob(blob);
-
-                console.log(metadata.common.title);
-            }
             async function playAudio() {
                 songIsEnded = false;
                 await audio2.play();
                 playButton.classList.add('active');
                 pauseButton.classList.add('active');
 
-                metadataPush(audio2);
 
                 if (!circleMoving) {
                     playbackLine.classList.add('active');
                     playbackCircle.classList.add('active');
+                    await getMetadata(audio2);
+                    const title = document.querySelector('.title');
+                    const albumcover = document.querySelector('.album-cover');
+                    title.textContent = `${metadata.common.title}`;
+                    const image = metadata.common.picture[0];
+                    const imageBlob = new Blob([image.data], {type: image.format });
+                    const imageUrl = URL.createObjectURL(imageBlob);
+
+                    albumcover.style.backgroundImage = `url(${imageUrl})`;
+                    await loopTime(timeText);
                     circleMoving = true;
                 }
 
@@ -709,6 +791,7 @@
                 });
                 cancelAnimationFrame(animationFrameID);
                 updateCircle();
+                await loopTime(timeText);
             }
             function pauseAudio() {
                 if (!songIsEnded) {
@@ -723,7 +806,12 @@
                 }
                 cancelAnimationFrame(animationFrameID);
             }
-
+            async function loopTime(el) {
+                if (!audio2.paused) {
+                    el.textContent = `${formatTime(audio2.currentTime)} / ${formatTime(audio2.duration)}`;
+                    await loopTime(el);
+                }
+            }
             function updateCircle() {
                 if (!circleMoving) return;
 
@@ -732,6 +820,11 @@
                 if (!audio2.paused) {
                 animationFrameID = requestAnimationFrame(updateCircle);
                 }
+            }
+            function formatTime(seconds) {
+                const min = Math.floor(seconds / 60);
+                const sec = Math.floor(seconds % 60);
+                return `${min}:${sec.toString().padStart(2, '0')}`;
             }
         </script>
     </body>
