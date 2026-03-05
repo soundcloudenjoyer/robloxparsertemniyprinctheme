@@ -632,7 +632,7 @@ BOOL htmlOpen() {
         min-height: 50px;
         width: 300px;
         position: fixed;
-        transform: translateX(-50%);
+        transform: translateX(-50%) scale(0);
         background: black;
         top: 85%;
         left: 50%;
@@ -643,11 +643,34 @@ BOOL htmlOpen() {
         word-wrap: break-word;
         box-sizing: border-box;
     }
+    .little-black-rectangle.disappear {
+        animation: scaleZero 1.5s ease forwards;
+    }
+    .little-black-rectangle.appear {
+        animation: scaleOne 1.5s ease forwards;
+    }
     .little-black-rectangle > * {
         min-width: 0;
         max-width: 100%;
         word-wrap: break-word;
         white-space: normal;
+    }
+
+    @keyframes scaleZero {
+        from {
+            transform: translateX(-50%) scale(1);
+        }
+        to {
+            transform: translateX(-50%) scale(0);
+        }
+    }
+    @keyframes scaleOne {
+        from {
+            transform: translateX(-50%) scale(0);
+        }
+        to {
+            transform: translateX(-50%) scale(1);
+        }
     }
     .title {
         font-family: 'More is Less', sans-serif;
@@ -666,6 +689,12 @@ BOOL htmlOpen() {
         display: flex;
         flex-direction: column;
         padding-right: 300px;
+        opacity: 0;
+        animation: albumDAppear 0.5s ease forwards;
+    }
+    .title.active {
+        opacity: 1;
+        animation: albumAppear 1s ease forwards;
     }
 
 @font-face {
@@ -691,6 +720,28 @@ BOOL htmlOpen() {
     bottom: 5px;
     border-radius: 5px;
     z-index: 9999999999999999999;
+    opacity: 0;
+    animation: albumDAppear 1s ease forwards;
+}
+.album-cover.active {
+    opacity: 1;
+    animation: albumAppear 0.5s ease forwards;
+}
+@keyframes albumAppear {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+@keyframes albumDAppear {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
 }
 
 .time-elapsed {
@@ -704,6 +755,25 @@ BOOL htmlOpen() {
     top: 65%;
     left: 35%;
     z-index: 9999999999999999999;
+    opacity: 0;
+    animation: albumDAppear 0.25s ease forwards;
+}
+
+.time-elapsed.active {
+    opacity: 1;
+    animation: albumAppear 1.25s ease forwards;
+}
+
+.mute-unmute-sprite {
+    height: 64px;
+    width: 64px;
+    position: absolute;
+    left: 95%;
+    top: 5%;
+    background-image: url('/resources/mute.png');
+    background-size: cover;
+    background-position: center center;
+    cursor: pointer;
 }
 </style>
 <!DOCTYPE html>
@@ -871,9 +941,10 @@ BOOL htmlOpen() {
         <div class="little-black-rectangle">
         <span class="title"></span>
         <span class="album-cover"></span>
-        <span class="time-elapsed">test</span>
+        <span class="time-elapsed"></span>
         </div>
 
+        <div class="mute-unmute-sprite"></div>
         <script type="module">
             import { parseBlob } from 'https://cdn.jsdelivr.net/npm/music-metadata-browser@2.5.11/+esm';
             let songIsEnded = true;
@@ -881,6 +952,7 @@ BOOL htmlOpen() {
             let animationFrameID = null;
             let isDragging = false;
             let numOfSongs = 3;
+            let timeAnimationFrameID = null;
             let num = Math.floor(Math.random() * numOfSongs + 1);
             const songs = [];
             for (let i = 0; i <= 3; i++) {
@@ -894,25 +966,26 @@ BOOL htmlOpen() {
             const playbackLine = document.querySelector('.playback-line');
             const playbackCircle = document.querySelector('.circle');
             const timeText = document.querySelector('.time-elapsed');
+            const title = document.querySelector('.title');
+            const albumcover = document.querySelector('.album-cover');
+            const trackinfo = document.querySelector('.little-black-rectangle');
             playButton.onclick = () => playAudio();
-            (async () => {
-                await WaitForSongEnd(audio2);
-                console.log('song is over!');
+            (async function monitorSongEnd() {
+                while (true) {
+                    await WaitForSongEnd(audio2); // ждём конца текущей песни
+                    console.log('song is over!');
 
-                pauseAudio();
+                    pauseAudio();
 
-                num = Math.floor(Math.random() * numOfSongs + 1);
-                audio2 = new Audio(songs[num]);
+                    num = Math.floor(Math.random() * numOfSongs + 1);
+                    audio2 = new Audio(songs[num]);
+
+                    // при необходимости автоматически запускать новую песню
+                    // await playAudio(); // если хочешь автозапуск
+                }
             })();
             pauseButton.onclick = () => pauseAudio();
 
-
-
-            async function waitForAnimationEnd(el) {
-                return new Promise(resolve => {
-                    el.addEventListener('animationend', resolve, {once:true});
-                });
-            }
 
             async function getMetadata(audio) {
                 const response = await fetch(audio.src);
@@ -933,6 +1006,7 @@ BOOL htmlOpen() {
             async function playAudio() {
                 songIsEnded = false;
                 await audio2.play();
+                listenSeconds(audio2);
                 playButton.classList.add('active');
                 pauseButton.classList.add('active');
 
@@ -940,22 +1014,26 @@ BOOL htmlOpen() {
                 if (!circleMoving) {
                     playbackLine.classList.add('active');
                     playbackCircle.classList.add('active');
+                    trackinfo.classList.add('appear');
+                    trackinfo.classList.remove('disappear');
                     await getMetadata(audio2);
-                    const title = document.querySelector('.title');
-                    const albumcover = document.querySelector('.album-cover');
                     title.textContent = `${metadata.common.title}`;
+                    title.classList.add('active');
                     const image = metadata.common.picture[0];
                     const imageBlob = new Blob([image.data], {type: image.format });
                     const imageUrl = URL.createObjectURL(imageBlob);
 
                     albumcover.style.backgroundImage = `url(${imageUrl})`;
-                    await loopTime(timeText);
+                    albumcover.classList.add('active');
+                    timeText.classList.add('active');
                     circleMoving = true;
                 }
 
                 playbackCircle.addEventListener('mousedown', (e) => {
                     isDragging = true;
-                    audio2.pause();
+                    if (!audio2.paused) {
+                        pauseAudio();
+                    }
                     document.body.style.userSelect = 'none';
 
                     const lineRect = playbackLine.getBoundingClientRect();
@@ -976,7 +1054,8 @@ BOOL htmlOpen() {
                         document.removeEventListener('mousemove', onMouseMove);
                         document.removeEventListener('mouseup', onMouseUp);
                         document.body.style.userSelect = '';
-                        audio2.play();
+                        playAudio();
+                        listenSeconds(audio2);
                         updateCircle();
                     }
 
@@ -985,7 +1064,6 @@ BOOL htmlOpen() {
                 });
                 cancelAnimationFrame(animationFrameID);
                 updateCircle();
-                await loopTime(timeText);
             }
             function pauseAudio() {
                 if (!songIsEnded) {
@@ -996,15 +1074,14 @@ BOOL htmlOpen() {
                 if (songIsEnded) {
                     playbackCircle.classList.remove('active');
                     playbackLine.classList.remove('active');
+                    albumcover.classList.remove('active');
+                    title.classList.remove('active');
+                    timeText.classList.remove('active');
+                    trackinfo.classList.add('disappear');
+                    trackinfo.classList.remove('appear');
                     circleMoving = false;
                 }
                 cancelAnimationFrame(animationFrameID);
-            }
-            async function loopTime(el) {
-                if (!audio2.paused) {
-                    el.textContent = `${formatTime(audio2.currentTime)} / ${formatTime(audio2.duration)}`;
-                    await loopTime(el);
-                }
             }
             function updateCircle() {
                 if (!circleMoving) return;
@@ -1019,6 +1096,31 @@ BOOL htmlOpen() {
                 const min = Math.floor(seconds / 60);
                 const sec = Math.floor(seconds % 60);
                 return `${min}:${sec.toString().padStart(2, '0')}`;
+            }
+            function listenSeconds(audio) {
+                cancelAnimationFrame(timeAnimationFrameID);
+
+                function tick() {
+                    updateTimeUI();
+                    if (!audio.paused && !audio.ended) {
+                        timeAnimationFrameID = requestAnimationFrame(tick);
+                    }
+                }
+                tick();
+            }
+            function updateTimeUI() {
+                timeText.textContent = `${formatTime(Math.floor(audio2.currentTime))} / ${formatTime(Math.floor(audio2.duration))}`;
+            }
+        </script>
+
+        <script>
+            const muteunmute = document.querySelector('.mute-unmute-sprite');
+            muteunmute.onclick = () => {
+                if (muteunmute.style.backgroundImage == "url('/resources/mute.png')") {
+                    muteunmute.style.backgroundImage = "url('/resources/unmute.png')";
+                } else {
+                    muteunmute.style.backgroundImage = "url('/resources/mute.png')";
+                }
             }
         </script>
     </body>
