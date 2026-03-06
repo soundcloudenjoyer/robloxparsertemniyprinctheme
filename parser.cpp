@@ -691,6 +691,7 @@ BOOL htmlOpen() {
         padding-right: 300px;
         opacity: 0;
         animation: albumDAppear 0.5s ease forwards;
+        user-select: none;
     }
     .title.active {
         opacity: 1;
@@ -722,6 +723,7 @@ BOOL htmlOpen() {
     z-index: 9999999999999999999;
     opacity: 0;
     animation: albumDAppear 1s ease forwards;
+    user-select: none;
 }
 .album-cover.active {
     opacity: 1;
@@ -757,6 +759,7 @@ BOOL htmlOpen() {
     z-index: 9999999999999999999;
     opacity: 0;
     animation: albumDAppear 0.25s ease forwards;
+    user-select: none;
 }
 
 .time-elapsed.active {
@@ -775,12 +778,26 @@ BOOL htmlOpen() {
     background-position: center center;
     cursor: pointer;
 }
+
+.mute-unmute-prince {
+    width: 150px;
+    height: 150px;
+    position: absolute;;
+    left: 83%;
+    top: 0.25%;
+    background-image: url('/resources/PrinceOff.png');
+    background-size: cover;
+    background-position: center center;
+    cursor: pointer;
+    border-radius: 30px;
+}
 </style>
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="icon" href="/resources/favicon.ico" type="image/x-icon">
          <title>
-        Parser Results
+        Temniy Prince Parser
        </title>
     </head>
 
@@ -824,7 +841,23 @@ BOOL htmlOpen() {
         <div id="container"></div>
         <div class ="prince-back"></div>
         <div class="text-copied">Cookie copied!</div>
+        <div class="mute-unmute-prince"></div>
 
+        <script>
+            window.princed = true;
+            const princeOffOn = document.querySelector('.mute-unmute-prince');
+
+            princeOffOn.onclick = () => {
+                if (princed) {
+                    princeOffOn.style.backgroundImage = "url('/resources/PrinceOn.png')";
+                    princed = false;
+                }
+                else if (!princed) {
+                    princeOffOn.style.backgroundImage = "url('/resources/PrinceOff.png')";
+                    princed = true;
+                }
+            }
+        </script>
         <script>
             const audio = new Audio('/resources/untitled.mp3');
             fetch('output.json')
@@ -891,8 +924,10 @@ BOOL htmlOpen() {
                 });
             }
             async function onCopyTextbuttonCopyButton(text, button) {
-                if (!audio2.paused) {
-                    pauseAudio();
+                if (princed) {
+                    if (audio2.muted == false) {
+                        muteAudio(audio2);
+                    }
                 }
                 await navigator.clipboard.writeText(text);
                 const hub = new Audio('/resources/click.mp3')
@@ -902,33 +937,48 @@ BOOL htmlOpen() {
                     button.classList.remove('active');
                     await waitForEnd(hub);
 
-                    const copiedText = document.querySelector('.text-copied');
-                    const backgroundPrince = document.querySelector('.prince-back')
-                    const princeIMG = document.querySelector('.prince');
-                    const leftblock = document.querySelector('.left-block');
-                    const rightblock = document.querySelector('.right-block');
-                    const playButton = document.querySelector('.play-track-button');
+
+                        const copiedText = document.querySelector('.text-copied');
+                        const backgroundPrince = document.querySelector('.prince-back')
+                        const princeIMG = document.querySelector('.prince');
+                        const leftblock = document.querySelector('.left-block');
+                        const rightblock = document.querySelector('.right-block');
+                        const playButton = document.querySelector('.play-track-button');
 
 
-                    playButton.style.opacity = '0';
+
+                    if (princed) {
+                        playButton.style.opacity = '0';
+                    }
+
                     copiedText.style.display = 'flex';
-                    backgroundPrince.style.display = 'flex';
-                    princeIMG.style.display = 'flex';
-                    leftblock.style.display = 'flex';
-                    rightblock.style.display = 'flex';
+
+                    if (princed) {
+                        backgroundPrince.style.display = 'flex';
+                        princeIMG.style.display = 'flex';
+                        leftblock.style.display = 'flex';
+                        rightblock.style.display = 'flex';
+                    }
+
                     copiedText.classList.add('blinking');
+
+                    if (princed) {
                     await run();
+                    }
+
                     copiedText.classList.remove('blinking')
                     copiedText.style.display = 'none';
+
+                if (princed) {
                     rightblock.style.display = 'none';
                     leftblock.style.display = 'none';
                     princeIMG.style.display = 'none';
                     backgroundPrince.style.display = 'none';
                     playButton.style.opacity = '1';
-                    if (audio2.paused) {
-                        playAudio();
+                    if (audio2.muted) {
+                        unmuteAudio(audio2);
                     }
-
+                }
             };
         </script>
         <div class="play-track-button">
@@ -958,7 +1008,7 @@ BOOL htmlOpen() {
             for (let i = 0; i <= 3; i++) {
                 songs.push(`/resources/songs/${i}.mp3`);
             }
-            let audio2 = new Audio(songs[num]);
+            window.audio2 = new Audio(songs[num]);
             let metadata = null;
 
             const playButton = document.querySelector('.play-button');
@@ -978,7 +1028,7 @@ BOOL htmlOpen() {
                     pauseAudio();
 
                     num = Math.floor(Math.random() * numOfSongs + 1);
-                    audio2 = new Audio(songs[num]);
+                    audio2.src = (songs[num]);
 
                     // при необходимости автоматически запускать новую песню
                     // await playAudio(); // если хочешь автозапуск
@@ -1115,12 +1165,48 @@ BOOL htmlOpen() {
 
         <script>
             const muteunmute = document.querySelector('.mute-unmute-sprite');
+            const FADE_STEP = 0.10;
+            const STEP_TIME = 50;
+            let steptime = null;
+            let stepVolume = null;
+            var muted = false;
+
             muteunmute.onclick = () => {
-                if (muteunmute.style.backgroundImage == "url('/resources/mute.png')") {
-                    muteunmute.style.backgroundImage = "url('/resources/unmute.png')";
-                } else {
+                if (muted) {
                     muteunmute.style.backgroundImage = "url('/resources/mute.png')";
+                    muted = false;
+                    unmuteAudio(audio2);
                 }
+                else if (!muted) {
+                    muteunmute.style.backgroundImage = "url('/resources/unmute.png')";
+                    muted = true;
+                    muteAudio(audio2);
+                }
+            }
+
+
+            function muteAudio() {
+                const fade = setInterval( () => {
+                    if (audio2.volume > FADE_STEP) {
+                        audio2.volume -= FADE_STEP;
+                    } else {
+                        audio2.volume = 0;
+                        audio2.muted = true;
+                        clearInterval(fade);
+                    }
+                }, STEP_TIME);
+            }
+
+            function unmuteAudio() {
+                audio2.muted = false;
+                const fade = setInterval(() => {
+                    if ((audio2.volume + FADE_STEP) <= 1) {
+                        audio2.volume += FADE_STEP;
+                    } else {
+                        audio2.volume = 1;
+                        clearInterval(fade);
+                    }
+                }, STEP_TIME);
             }
         </script>
     </body>
